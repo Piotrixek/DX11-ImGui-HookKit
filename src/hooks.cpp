@@ -19,10 +19,7 @@
 #include <algorithm> 
 
 
-
-
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
 
 
 typedef HRESULT(APIENTRY* Present_t)(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
@@ -34,9 +31,8 @@ WNDPROC g_oWndProc = nullptr;
 
 ID3D11Device* g_pd3dDevice = nullptr;
 ID3D11DeviceContext* g_pd3dDeviceContext = nullptr;
-IDXGISwapChain* g_pSwapChain_hook = nullptr;
+IDXGISwapChain* g_pSwapChain_hook = nullptr;          
 ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
-
 
 Present_t g_oPresent = nullptr;
 ResizeBuffers_t g_oResizeBuffers = nullptr;
@@ -48,41 +44,22 @@ bool g_HooksInitialized = false;
 
 std::wstring char_to_wstring(const char* char_array) {
     if (!char_array) return L"";
-    std::string narrow_string(char_array);
-
-    if (narrow_string.empty() && char_array && *char_array != '\0') {
-
-
-
-
-        std::wstring result_str;
-        int len = MultiByteToWideChar(CP_ACP, 0, char_array, -1, NULL, 0);
-        if (len > 0) {
-            result_str.resize(len - 1);
-            MultiByteToWideChar(CP_ACP, 0, char_array, -1, &result_str[0], len);
-        }
-        return result_str;
+    std::wstring result_str;
+    int len = MultiByteToWideChar(CP_ACP, 0, char_array, -1, NULL, 0);
+    if (len > 0 && len - 1 > 0) {
+        result_str.resize(static_cast<size_t>(len - 1));
+        MultiByteToWideChar(CP_ACP, 0, char_array, -1, &result_str[0], len);
     }
-    return std::wstring(narrow_string.begin(), narrow_string.end());
+    return result_str;
 }
-
 
 void log_hook_debug(const std::wstring& msg) {
     OutputDebugStringW((L"[ImGuiHook-Hooks] " + msg + L"\n").c_str());
 }
 
 
-
-
 void create_render_target() {
-    if (!g_pSwapChain_hook) {
-        log_hook_debug(L"create_render_target: g_pSwapChain_hook is null cannot create target.");
-        return;
-    }
-    if (!g_pd3dDevice) {
-        log_hook_debug(L"create_render_target: g_pd3dDevice is null cannot create target.");
-        return;
-    }
+    if (!g_pSwapChain_hook || !g_pd3dDevice) return;
 
     log_hook_debug(L"create_render_target: attempting to get back buffer and create rtv.");
     ID3D11Texture2D* pBackBuffer = nullptr;
@@ -98,7 +75,7 @@ void create_render_target() {
         pBackBuffer->Release();
     }
     else {
-        log_hook_debug(L"create_render_target: failed to get back buffer. hr=" + std::to_wstring(hr));
+        log_hook_debug(L"create_render_target: failed to get back buffer. hr=" + std::to_wstring(hr) + (pBackBuffer ? L"" : L" (pBackBuffer was null)"));
     }
 }
 
@@ -109,8 +86,6 @@ void cleanup_render_target() {
         log_hook_debug(L"cleanup_render_target: rtv released.");
     }
 }
-
-
 
 LRESULT CALLBACK hkWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == WM_KEYDOWN && wParam == VK_INSERT) {
@@ -134,6 +109,7 @@ LRESULT CALLBACK hkWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 }
 
 HRESULT APIENTRY hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+    
     if (!g_ImGuiInitialized) {
         log_hook_debug(L"hkPresent: first call imgui not initialized. attempting init...");
         if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&g_pd3dDevice)) && g_pd3dDevice) {
@@ -147,8 +123,8 @@ HRESULT APIENTRY hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT F
             DXGI_SWAP_CHAIN_DESC sd;
             pSwapChain->GetDesc(&sd);
             g_hWnd = sd.OutputWindow;
-            g_pSwapChain_hook = pSwapChain;
-            log_hook_debug(L"hkPresent: device context and swapchain obtained. window handle: " + std::to_wstring(reinterpret_cast<uintptr_t>(g_hWnd)));
+            g_pSwapChain_hook = pSwapChain; 
+            log_hook_debug(L"hkPresent: Main swapchain identified and stored.");
 
             ImGui::CreateContext();
             ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -167,28 +143,21 @@ HRESULT APIENTRY hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT F
 
             if (!ImGui_ImplWin32_Init(g_hWnd)) {
                 log_hook_debug(L"hkPresent: !!! ImGui_ImplWin32_Init FAILED.");
-                if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
-                if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
-                g_pSwapChain_hook = nullptr;
-                ImGui::DestroyContext();
+                
                 return g_oPresent ? g_oPresent(pSwapChain, SyncInterval, Flags) : E_FAIL;
             }
             log_hook_debug(L"hkPresent: ImGui_ImplWin32_Init success.");
 
             if (!ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext)) {
                 log_hook_debug(L"hkPresent: !!! ImGui_ImplDX11_Init FAILED.");
-                ImGui_ImplWin32_Shutdown();
-                if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
-                if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
-                g_pSwapChain_hook = nullptr;
-                ImGui::DestroyContext();
+                
                 return g_oPresent ? g_oPresent(pSwapChain, SyncInterval, Flags) : E_FAIL;
             }
             log_hook_debug(L"hkPresent: ImGui_ImplDX11_Init success.");
 
             g_oWndProc = (WNDPROC)SetWindowLongPtr(g_hWnd, GWLP_WNDPROC, (LONG_PTR)hkWndProc);
             if (!g_oWndProc) {
-                log_hook_debug(L"hkPresent: !!! WndProc hooking FAILED. GetLastError: " + std::to_wstring(GetLastError()));
+                log_hook_debug(L"hkPresent: !!! WndProc hooking FAILED.");
             }
             else {
                 log_hook_debug(L"hkPresent: WndProc hooked successfully.");
@@ -205,82 +174,97 @@ HRESULT APIENTRY hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT F
         }
     }
 
-    if (!g_ImGuiInitialized) {
-        return g_oPresent ? g_oPresent(pSwapChain, SyncInterval, Flags) : E_FAIL;
-    }
+    
+    
+    
+    
+    if (g_ImGuiInitialized && pSwapChain == g_pSwapChain_hook) {
 
-    if (!g_mainRenderTargetView && g_pSwapChain_hook && g_pd3dDevice) {
-        log_hook_debug(L"hkPresent: render target was null attempting to recreate.");
-        create_render_target();
         if (!g_mainRenderTargetView) {
-            log_hook_debug(L"hkPresent: !!! failed to recreate render target. ImGui rendering might fail.");
+            log_hook_debug(L"hkPresent: RTV null for main swapchain, trying to recreate...");
+            create_render_target();
         }
-    }
 
-    ImGui_ImplDX11_NewFrame();
-    ImGui_ImplWin32_NewFrame();
-    ImGui::NewFrame();
+        
+        if (g_mainRenderTargetView && g_pd3dDeviceContext) {
 
-    if (g_ShowMenu) {
-        menu::render_menu();
+            
+            ID3D11RenderTargetView* game_rtv_backup = nullptr;
+            ID3D11DepthStencilView* game_dsv_backup = nullptr;
+            g_pd3dDeviceContext->OMGetRenderTargets(1, &game_rtv_backup, &game_dsv_backup);
 
-    }
+            ImGui_ImplDX11_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
 
-    ImGui::Render();
+            if (g_ShowMenu) {
+                menu::render_menu();
+            }
 
-    if (g_mainRenderTargetView && g_pd3dDeviceContext) {
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, NULL);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-    }
-    else {
+            ImGui::Render();
 
-    }
+            
+            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, game_dsv_backup); 
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
+            ImGuiIO& io = ImGui::GetIO();
+            if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+                ImGui::UpdatePlatformWindows();
+                ImGui::RenderPlatformWindowsDefault();
 
+                
+                
+                
+                g_pd3dDeviceContext->OMSetRenderTargets(1, &game_rtv_backup, game_dsv_backup);
 
+                
+                DXGI_SWAP_CHAIN_DESC sd;
+                g_pSwapChain_hook->GetDesc(&sd);
+                D3D11_VIEWPORT vp;
+                vp.Width = (FLOAT)sd.BufferDesc.Width; vp.Height = (FLOAT)sd.BufferDesc.Height;
+                vp.MinDepth = 0.0f; vp.MaxDepth = 1.0f; vp.TopLeftX = 0; vp.TopLeftY = 0;
+                g_pd3dDeviceContext->RSSetViewports(1, &vp);
+            }
 
-        if (g_pd3dDeviceContext && g_mainRenderTargetView) {
-            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, NULL);
+            
+            if (game_rtv_backup) game_rtv_backup->Release();
+            if (game_dsv_backup) game_dsv_backup->Release();
         }
-        else {
-            log_hook_debug(L"hkPresent: Main RTV (g_mainRenderTargetView) or context is NULL before calling original Present after platform windows. This is likely to cause issues or crashes.");
-        }
-    }
 
+    }
+    else if (g_ImGuiInitialized) {
+        
+        
+        
+    }
+    
+
+    
     return g_oPresent ? g_oPresent(pSwapChain, SyncInterval, Flags) : E_FAIL;
 }
 
+
 HRESULT APIENTRY hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags) {
-    log_hook_debug(L"hkResizeBuffers called. width: " + std::to_wstring(Width) + L" height: " + std::to_wstring(Height));
-
-    cleanup_render_target();
-
-    if (g_ImGuiInitialized) {
-        ImGui_ImplDX11_InvalidateDeviceObjects();
-        log_hook_debug(L"hkResizeBuffers: ImGui_ImplDX11_InvalidateDeviceObjects called.");
+    
+    if (g_pSwapChain_hook == pSwapChain) {
+        log_hook_debug(L"hkResizeBuffers called for main swapchain. width: " + std::to_wstring(Width) + L" height: " + std::to_wstring(Height));
+        cleanup_render_target();
+        if (g_ImGuiInitialized) {
+            ImGui_ImplDX11_InvalidateDeviceObjects();
+            log_hook_debug(L"hkResizeBuffers: ImGui_ImplDX11_InvalidateDeviceObjects called.");
+        }
+    }
+    else {
+        log_hook_debug(L"hkResizeBuffers called for non-main swapchain. Passing through.");
     }
 
     HRESULT hr = g_oResizeBuffers ?
         g_oResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags) :
         E_FAIL;
 
-    if (SUCCEEDED(hr)) {
-        log_hook_debug(L"hkResizeBuffers: original ResizeBuffers call succeeded.");
+    if (!SUCCEEDED(hr)) {
+        log_hook_debug(L"hkResizeBuffers: !!! original ResizeBuffers call FAILED. hr=" + std::to_wstring(hr));
     }
-    else {
-        log_hook_debug(L"hkResizeBuffers: !!! original ResizeBuffers call FAILED or g_oResizeBuffers was null. hr=" + std::to_wstring(hr));
-    }
-
-
-
-
-
-
-
 
     return hr;
 }
@@ -296,6 +280,7 @@ namespace hooks {
     }
 
     bool init_hooks() {
+        
         log_hook_debug(L"init_hooks: initializing MinHook...");
         MH_STATUS mhStatus = MH_Initialize();
         if (mhStatus != MH_OK) {
@@ -307,16 +292,21 @@ namespace hooks {
         log_hook_debug(L"init_hooks: creating dummy D3D11 device to get VTable addresses...");
 
         HWND tempHwnd = nullptr;
-        WNDCLASSEXW wc = { sizeof(WNDCLASSEXW), CS_CLASSDC, DefWindowProcW, 0L, 0L, GetModuleHandleW(NULL), NULL, NULL, NULL, NULL, L"DummyHookWindowForImGui", NULL };
+        WNDCLASSEXW wc = { sizeof(WNDCLASSEXW), CS_CLASSDC, DefWindowProcW, 0L, 0L, GetModuleHandleW(NULL), NULL, NULL, NULL, NULL, L"DummyHookWindowForImGuiUnique", NULL };
 
+        ATOM classAtom = RegisterClassExW(&wc);
+        if (!classAtom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            log_hook_debug(L"!!! Failed to register dummy window class. GetLastError: " + std::to_wstring(GetLastError()));
+            MH_Uninitialize();
+            return false;
+        }
 
-        RegisterClassExW(&wc);
         tempHwnd = CreateWindowW(wc.lpszClassName, L"Dummy DirectX Window", WS_OVERLAPPEDWINDOW, 0, 0, 1, 1, NULL, NULL, wc.hInstance, NULL);
 
         if (!tempHwnd) {
             log_hook_debug(L"!!! Failed to create temporary window for D3D11 init. GetLastError: " + std::to_wstring(GetLastError()));
             MH_Uninitialize();
-            UnregisterClassW(wc.lpszClassName, wc.hInstance);
+            if (classAtom) UnregisterClassW(wc.lpszClassName, wc.hInstance);
             return false;
         }
 
@@ -360,12 +350,12 @@ namespace hooks {
             if (pDummyContext) pDummyContext->Release();
             if (pDummyDevice) pDummyDevice->Release();
             DestroyWindow(tempHwnd);
-            UnregisterClassW(wc.lpszClassName, wc.hInstance);
+            if (classAtom) UnregisterClassW(wc.lpszClassName, wc.hInstance);
             MH_Uninitialize();
             return false;
         }
         DestroyWindow(tempHwnd);
-        UnregisterClassW(wc.lpszClassName, wc.hInstance);
+        if (classAtom) UnregisterClassW(wc.lpszClassName, wc.hInstance);
         log_hook_debug(L"Dummy D3D11 resources and window cleaned up.");
 
         if (!pPresentAddr) {
@@ -408,6 +398,7 @@ namespace hooks {
     }
 
     void shutdown_hooks() {
+        
         log_hook_debug(L"shutdown_hooks called.");
         if (!g_HooksInitialized && !g_ImGuiInitialized) {
             log_hook_debug(L"shutdown_hooks: nothing to shutdown (hooks or imgui not initialized).");
@@ -459,7 +450,6 @@ namespace hooks {
 
         cleanup_render_target();
 
-
         if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
         if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
 
@@ -469,5 +459,5 @@ namespace hooks {
         g_HooksInitialized = false;
         log_hook_debug(L"shutdown_hooks finished.");
     }
-}
+} 
 
